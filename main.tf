@@ -8,103 +8,99 @@ resource "aws_vpc" "school_vpc" {
   cidr_block = "10.0.0.0/16"
 }
 
-# Create an internet gateway for the VPC
+# Create Internet Gateway
 resource "aws_internet_gateway" "school_gateway" {
   vpc_id = aws_vpc.school_vpc.id
 }
 
-# Create a public subnet
+# Create Public Subnet
 resource "aws_subnet" "public_subnet" {
   vpc_id            = aws_vpc.school_vpc.id
   cidr_block        = "10.0.1.0/24"
-  availability_zone = "us-east-1a" # Update for each availability zone
+  availability_zone = "us-east-1a"
+
+  # Enable auto-assign public IP addresses
+  map_public_ip_on_launch = true
 }
 
-# Create a route table for the public subnet
+# Create Private Subnet
+resource "aws_subnet" "private_subnet" {
+  vpc_id            = aws_vpc.school_vpc.id
+  cidr_block        = "10.0.2.0/24"
+  availability_zone = "us-east-1b"
+}
+
+# Create Route Table for Public Subnet
 resource "aws_route_table" "public_route_table" {
   vpc_id = aws_vpc.school_vpc.id
 }
 
-# Create a route to the internet gateway
+# Create Route for Public Subnet
 resource "aws_route" "public_route" {
   route_table_id = aws_route_table.public_route_table.id
+  cidr_block     = "0.0.0.0/0"
   gateway_id     = aws_internet_gateway.school_gateway.id
-  destination_cidr_block = "0.0.0.0/0"
 }
 
-# Associate the public subnet with the route table
-resource "aws_route_table_association" "public_association" {
-  subnet_id      = aws_subnet.public_subnet.id
-  route_table_id = aws_route_table.public_route_table.id
-}
-
-# Create a security group for the web server
-resource "aws_security_group" "web_server_sg" {
-  name = "web_server_sg"
+# Create Route Table for Private Subnet (no internet access)
+resource "aws_route_table" "private_route_table" {
   vpc_id = aws_vpc.school_vpc.id
+}
 
+# Create Route for Private Subnet (connects to NAT Gateway later)
+resource "aws_route" "private_route" {
+  route_table_id = aws_route_table.private_route_table.id
+  cidr_block     = "0.0.0.0/0"
+}
+
+# Create NAT Gateway (for private subnet instances to access internet)
+resource "aws_nat_gateway" "school_nat_gateway" {
+  subnet_id = aws_subnet.public_subnet.id
+
+  # Allocate an elastic IP address
+  allocation_id = aws_eip.nat_gateway_eip.id
+}
+
+# Create Elastic IP for NAT Gateway
+resource "aws_eip" "nat_gateway_eip" {
+  depends_on = [aws_internet_gateway.school_gateway]
+
+  allocation_id = aws_internet_gateway.school_gateway.public_ip
+
+  # Associate the IP with the NAT Gateway
+  association_id = aws_nat_gateway.school_nat_gateway.id
+}
+
+# Create Security Groups (add specific rules based on your needs)
+resource "aws_security_group" "web_server_sg" {
+  name        = "web_server_sg"
+  vpc_id      = aws_vpc.school_vpc.id
+  description = "Security group for web server instances"
+
+  # Allow inbound HTTP traffic from anywhere
   ingress {
     from_port = 80
     to_port   = 80
-    protocol = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] # Update to restrict access if needed
-  }
-
-  egress {
-    from_port = 0
-    to_port   = 0
-    protocol = "-1"
+    protocol  = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  # Allow SSH access from your IP address
+  ingress {
+    from_port = 22
+    to_port   = 22
+    protocol  = "tcp"
+    cidr_blocks = ["your_public_ip/32"]
+  }
 }
 
-# Create an Aurora database cluster
+# ... (add resources for database, Lambda function, S3 buckets, etc.)
+
+# Example: Create an Aurora MySQL database
+
 resource "aws_rds_cluster" "school_db" {
-  engine         = "aurora-mysql"
-  cluster_identifier = "school-db-cluster"
-  database_name     = "<your_database_name>"
-  master_username   = "<your_database_username>"
-  master_password   = "<your_database_password>"
-  allocated_storage = 20
-
-  vpc_security_group_ids = [aws_security_group.web_server_sg.id]
-}
-
-# Create an S3 bucket for storing images
-resource "aws_s3_bucket" "school_images" {
-  bucket = "<your_s3_bucket_name>"
-  acl    = "private"
-}
-
-# IAM Role for the Lambda function (replace with your specific policies)
-resource "aws_iam_role" "lambda_role" {
-  name = "lambda_role"
-
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "lambda.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-EOF
-}
-
-# IAM policy for the Lambda function (replace with your specific permissions)
-resource "aws_iam_policy" "lambda_policy" {
-  name = "lambda_policy"
-
-  policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "
+  engine                = "aurora-mysql"
+  engine_version        = "5.7.12"
+  db_cluster_parameter_group_name = "default-aurora-cluster-parameter-group"
+  allocated_storage    = 20
+  database_name        = "school_
